@@ -21,6 +21,7 @@ namespace LLMSiteClassifier.Services.LLMService.HttpClientFactory
             return provider switch
             {
                 LlmProvider.Gemini => new GeminiHttpClient(client),
+                LlmProvider.Grok => new GrokHttpClient(client),
                 _ => throw new NotSupportedException($"Provider {provider} not supported")
             };
         }
