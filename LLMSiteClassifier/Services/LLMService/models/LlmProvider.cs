@@ -5,6 +5,7 @@ namespace LLMSiteClassifier.Services.LLMService.models
         ChatGPT,
         Grok,
         Claude,
+        Mistral,
         Gemini
     }
 }
