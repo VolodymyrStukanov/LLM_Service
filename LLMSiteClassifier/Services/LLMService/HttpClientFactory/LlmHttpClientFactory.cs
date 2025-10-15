@@ -22,6 +22,7 @@ namespace LLMSiteClassifier.Services.LLMService.HttpClientFactory
             {
                 LlmProvider.Gemini => new GeminiHttpClient(client),
                 LlmProvider.Grok => new GrokHttpClient(client),
+                LlmProvider.Claude => new ClaudeHttpClient(client),
                 _ => throw new NotSupportedException($"Provider {provider} not supported")
             };
         }
