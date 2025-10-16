@@ -24,6 +24,7 @@ namespace LLMSiteClassifier.Services.LLMService.HttpClientFactory
                 LlmProvider.Grok => new GrokHttpClient(client),
                 LlmProvider.Claude => new ClaudeHttpClient(client),
                 LlmProvider.Mistral => new MistralHttpClient(client),
+                LlmProvider.OpenAI => new OpenAiHttpClient(client),
                 _ => throw new NotSupportedException($"Provider {provider} not supported")
             };
         }

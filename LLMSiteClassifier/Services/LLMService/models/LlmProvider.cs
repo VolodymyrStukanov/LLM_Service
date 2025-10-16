@@ -2,7 +2,7 @@ namespace LLMSiteClassifier.Services.LLMService.models
 {
     public enum LlmProvider
     {
-        ChatGPT,
+        OpenAI,
         Grok,
         Claude,
         Mistral,
