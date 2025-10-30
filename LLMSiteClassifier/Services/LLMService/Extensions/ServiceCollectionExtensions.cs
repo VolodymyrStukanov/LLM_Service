@@ -1,5 +1,4 @@
 using LLMSiteClassifier.Services.LLMService.HttpClientFactory;
-using LLMSiteClassifier.Services.LLMService.Interfaces;
 using LLMSiteClassifier.Services.LLMService.models;
 using Polly;
 
@@ -9,7 +8,6 @@ namespace LLMSiteClassifier.Services.LLMService.Extensions
     {
         public static IServiceCollection AddLlmHttpClients(this IServiceCollection services, IConfiguration configuration)
         {
-            // Bind configuration
             services.Configure<LlmServiceSettings>(configuration.GetSection("LlmServiceSettings"));
 
             var settings = configuration.GetSection("LlmServiceSettings").Get<LlmServiceSettings>();
