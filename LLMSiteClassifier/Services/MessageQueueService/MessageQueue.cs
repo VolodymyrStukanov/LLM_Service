@@ -11,7 +11,6 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
     public class MessageQueue : BackgroundService
     {
         private IChannel channel;
-        private IConnection connection;
         private readonly string inputQueueName;
         private readonly ConnectionFactory connectionFactory;
         private readonly LlmService llmService;
@@ -27,10 +26,10 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            this.connection = await this.connectionFactory.CreateConnectionAsync();
-            this.channel = await this.connection.CreateChannelAsync();
+            var connection = await this.connectionFactory.CreateConnectionAsync();
+            this.channel = await connection.CreateChannelAsync();
             await CreateQueues(this.channel);
-            StartConsumingParserMessages();
+            StartConsumingMessages();
             await Task.Delay(Timeout.Infinite, stoppingToken);
         }
 
@@ -43,7 +42,7 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
             arguments: null);
         }
 
-        private async Task StartConsumingParserMessages()
+        private async Task StartConsumingMessages()
         {
             var consumer = new AsyncEventingBasicConsumer(channel);
             consumer.ReceivedAsync += async (model, ea) =>
@@ -57,7 +56,11 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
 
                         var body = ea.Body.ToArray();
                         var message = Encoding.UTF8.GetString(body);
-                        var inputMessage = JsonSerializer.Deserialize<InputMessage>(message)!;
+                        var inputMessage = JsonSerializer.Deserialize<InputMessage>(message, new JsonSerializerOptions
+                        {
+                            AllowTrailingCommas = true
+                        })!;
+
                         this.logger.LogInformation($"Finished processing message. Correlation id: {correlationId}");
 
                         var response = await this.llmService.GetCompletionAsync(LlmProvider.Gemini, inputMessage.Prompt);
@@ -71,8 +74,6 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
                 {
                     this.logger.LogError(exception: ex, $"Error during processing message. Correlation id: {correlationId}.\nMessage: {ex.Message}");
                     await channel.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: true);
-                    this.channel.Dispose();
-                    connection.Dispose();
                 }
             };
 
@@ -87,13 +88,22 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
                 autoDelete: false,
                 arguments: null);
 
-            var bodyJson = JsonSerializer.Serialize(new { LlmResponse = response });
-            var bodyBites = Encoding.UTF8.GetBytes(bodyJson);
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                writer.WritePropertyName("LlmResponse");
+                writer.WriteRawValue(response);
+                writer.WriteEndObject();
+            }
+            
+            var bodyBytes = stream.ToArray();
+
             await this.channel.BasicPublishAsync(exchange: "",
                 routingKey: replyTo,
                 mandatory: true,
                 basicProperties: new BasicProperties { CorrelationId = correlationId },
-                body: bodyBites);
+                body: bodyBytes);
         }
     }
 }

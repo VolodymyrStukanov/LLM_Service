@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using LLMSiteClassifier.Services.LLMService.HttpClientFactory;
 using LLMSiteClassifier.Services.LLMService.models;
 
@@ -16,7 +17,8 @@ namespace LLMSiteClassifier.Services.LLMService
         {
             var client = clientFactory.CreateClient(provider);
             var response = await client.SendToLlm(prompt);
-            return response;
+            string jsonContent = Regex.Match(response, @"```json\s*([\s\S]*?)\s*```").Groups[1].Value;
+            return jsonContent;
         }
     }
 }
