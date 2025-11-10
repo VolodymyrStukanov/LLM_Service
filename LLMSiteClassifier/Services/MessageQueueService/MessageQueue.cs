@@ -10,6 +10,15 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
 {
     public class MessageQueue : BackgroundService
     {
+        private readonly Dictionary<string, LlmProvider> llmProvidersDict = new Dictionary<string, LlmProvider>()
+        {
+            {"Gemini", LlmProvider.Gemini },
+            {"OpenAI", LlmProvider.OpenAI },
+            {"Grok", LlmProvider.Grok },
+            {"Claude", LlmProvider.Claude },
+            {"Mistral", LlmProvider.Mistral },
+        };
+
         private IChannel channel;
         private readonly string inputQueueName;
         private readonly ConnectionFactory connectionFactory;
@@ -69,7 +78,7 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
                         {
                             try
                             {
-                                var response = await this.llmService.GetCompletionAsync(LlmProvider.Gemini, inputMessage.Prompt);
+                                var response = await this.llmService.GetCompletionAsync(llmProvidersDict[inputMessage.ModelProvider], inputMessage.Prompt);
                                 await PublishMessage(correlationId, inputMessage.ReplyTo, response);
 
                                 await LockedActionWithChannelSemaphore(
