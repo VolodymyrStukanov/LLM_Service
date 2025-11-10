@@ -15,6 +15,8 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
         private readonly ConnectionFactory connectionFactory;
         private readonly LlmService llmService;
         private readonly ILogger<MessageQueue> logger;
+
+        private readonly SemaphoreSlim channelSemaphore = new SemaphoreSlim(1, 1);
         public MessageQueue(IConfiguration config,  ILogger<MessageQueue> logger, LlmService llmService)
         {
             var hostName = config["RabbitMQ:HostName"]!;
@@ -63,11 +65,25 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
 
                         this.logger.LogInformation($"Finished processing message. Correlation id: {correlationId}");
 
-                        var response = await this.llmService.GetCompletionAsync(LlmProvider.Gemini, inputMessage.Prompt);
-                        await PublishMessage(correlationId, inputMessage.ReplyTo, response);
-                        
-                        await channel.BasicAckAsync(deliveryTag: ea.DeliveryTag, multiple: false);
-                        this.logger.LogInformation($"Finished sending response back. Correlation id: {correlationId}");
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var response = await this.llmService.GetCompletionAsync(LlmProvider.Gemini, inputMessage.Prompt);
+                                await PublishMessage(correlationId, inputMessage.ReplyTo, response);
+
+                                await LockedActionWithChannelSemaphore(
+                                    async () => await channel.BasicAckAsync(deliveryTag: ea.DeliveryTag, multiple: false));
+
+                                this.logger.LogInformation($"Finished sending response back. Correlation id: {correlationId}");
+                            }
+                            catch (Exception ex)
+                            {
+                                this.logger.LogError(exception: ex, $"Error during processing message. Correlation id: {correlationId}.\nMessage: {ex.Message}");
+                                await LockedActionWithChannelSemaphore(
+                                    async () => await channel.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: true));
+                            }
+                        });
                     }
                 }
                 catch (Exception ex)
@@ -78,7 +94,20 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
             };
 
             await this.channel.BasicConsumeAsync(this.inputQueueName, autoAck: false, consumer: consumer);
-        } 
+        }
+
+        private async Task LockedActionWithChannelSemaphore(Func<Task> action) 
+        {
+            await channelSemaphore.WaitAsync();
+            try
+            {
+                await action.Invoke();
+            }
+            finally
+            {
+                channelSemaphore.Release();
+            }
+        }
 
         public async Task PublishMessage(string correlationId, string replyTo, string response)
         {
@@ -96,7 +125,7 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
                 writer.WriteRawValue(response);
                 writer.WriteEndObject();
             }
-            
+
             var bodyBytes = stream.ToArray();
 
             await this.channel.BasicPublishAsync(exchange: "",
