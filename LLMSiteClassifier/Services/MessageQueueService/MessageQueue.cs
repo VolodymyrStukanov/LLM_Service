@@ -1,7 +1,9 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using LLMSiteClassifier.Services.LLMService;
 using LLMSiteClassifier.Services.LLMService.models;
+using LLMSiteClassifier.Services.MessageQueueService;
 using LLMSiteClassifier.Services.MessageQueueService.models;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -19,15 +21,20 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
             {"Mistral", LlmProvider.Mistral },
         };
 
-        private IChannel? channel;
-        private IConnection? connection;
+        private IConnection? inputConnection;
+        private IConnection? outputConnection;
+        private bool publishingStarted = false;
+        private IChannel? outputChannel;
         private readonly string inputQueueName;
         private readonly ConnectionFactory connectionFactory;
         private readonly LlmService llmService;
         private readonly ILogger<MessageQueue> logger;
 
-        private readonly SemaphoreSlim processingSlots;
-        private readonly int maxConcurrentMessages;
+        private readonly ConcurrentQueue<OutputMessage> outputQueue = new();
+
+        private readonly int maxConcurrentInputChannels;
+        private readonly SemaphoreSlim outputConnectionLock = new(1, 1);
+        private readonly SemaphoreSlim startPublishingLock = new(1, 1);
 
         private TaskCompletionSource<bool> reconnectionTrigger = new();
         private int consecutiveFailuresCounter = 0;
@@ -36,7 +43,7 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
         {
             var hostName = config["RabbitMQ:HostName"]!;
             this.inputQueueName = config["RabbitMQ:QueueName"]!;
-            this.maxConcurrentMessages = config.GetValue<int>("RabbitMQ:MaxConcurrentMessages", 10);
+            this.maxConcurrentInputChannels = config.GetValue<int>("RabbitMQ:MaxConcurrentInputChannels", 10);
             this.connectionFactory = new ConnectionFactory() 
             { 
                 HostName = hostName,
@@ -48,7 +55,6 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
             };
             this.logger = logger;
             this.llmService = llmService;
-            this.processingSlots = new SemaphoreSlim(maxConcurrentMessages, maxConcurrentMessages);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -71,7 +77,7 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
                     var backoffSeconds = Math.Pow(2, this.consecutiveFailuresCounter - 1);
                     backoffSeconds = backoffSeconds > MaxBackoffSeconds ? MaxBackoffSeconds : backoffSeconds;
                     this.logger.LogError(ex, 
-                        $"Consumer failed (consecutive failures: {consecutiveFailuresCounter}). " +
+                        $"Connection failed (consecutive failures: {consecutiveFailuresCounter}). " +
                         $"Reconnecting in {backoffSeconds}s");
 
                     await CleanupConnectionAsync();                
@@ -91,24 +97,11 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
         {
             this.reconnectionTrigger = new TaskCompletionSource<bool>();
 
-            this.connection = await this.connectionFactory.CreateConnectionAsync();
-            this.connection.ConnectionShutdownAsync += OnConnectionShutdown;
-            this.connection.CallbackExceptionAsync += OnCallbackException;
+            this.inputConnection = await this.connectionFactory.CreateConnectionAsync();
+            this.inputConnection.ConnectionShutdownAsync += OnConnectionShutdown;
+            this.inputConnection.CallbackExceptionAsync += OnCallbackException;
 
-            this.channel = await this.connection.CreateChannelAsync();
-            await this.channel.BasicQosAsync(
-                prefetchSize: 0, 
-                prefetchCount: (ushort)maxConcurrentMessages, 
-                global: false);
-            
-            await this.channel.QueueDeclareAsync(
-                queue: this.inputQueueName,
-                durable: true,
-                exclusive: false,
-                autoDelete: false,
-                arguments: null);
-
-            await StartConsumingMessages();
+            await CreateConsumingChannels(stoppingToken);
             this.consecutiveFailuresCounter = 0;
 
             var cancellationTask = Task.Delay(Timeout.Infinite, stoppingToken);
@@ -142,36 +135,72 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
         }
 
         private async Task CleanupConnectionAsync()
-        {
-            if (this.channel != null)
+        {            
+            if (this.inputConnection != null)
             {
-                try { await this.channel.CloseAsync(); } catch { }
-                try { await this.channel.DisposeAsync(); } catch { }
-                this.channel = null;
-            }
-            
-            if (this.connection != null)
-            {
-                try { await this.connection.CloseAsync(); } catch { }
-                try { await this.connection.DisposeAsync(); } catch { }
-                this.connection = null;
+                try { await this.inputConnection.CloseAsync(); } catch { }
+                try { await this.inputConnection.DisposeAsync(); } catch { }
+                this.inputConnection = null;
             }
         }
 
-        private async Task StartConsumingMessages()
+        private async Task CreateConsumingChannels(CancellationToken stoppingToken)
         {
-            var consumer = new AsyncEventingBasicConsumer(channel!);
+            for (int i = 0; i < maxConcurrentInputChannels; i++)
+            {
+                var consumingChannel = new ConsumingChannel(this.inputQueueName, this.inputConnection!, StartConsuming);
+                _ = Task.Run(async () => 
+                {
+                    while (!stoppingToken.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            await consumingChannel.RunChannel(stoppingToken);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            this.logger.LogInformation("Consumer shutting down gracefully");
+                            break;
+                        }
+                        catch(Exception ex)
+                        {
+                            this.consecutiveFailuresCounter++;
+
+                            var backoffSeconds = Math.Pow(2, this.consecutiveFailuresCounter - 1);
+                            backoffSeconds = backoffSeconds > MaxBackoffSeconds ? MaxBackoffSeconds : backoffSeconds;
+                            this.logger.LogError(ex, 
+                                $"Consumer failed (consecutive failures: {consecutiveFailuresCounter}). " +
+                                $"Reconnecting in {backoffSeconds}s");
+
+                            await CleanupConnectionAsync();                
+                            try
+                            {
+                                await Task.Delay(TimeSpan.FromSeconds(backoffSeconds), stoppingToken);
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                break;
+                            }
+                        }
+                    }                    
+                });
+                
+            }
+        }
+
+        private async Task StartConsuming(IChannel channel)
+        {
+            var consumer = new AsyncEventingBasicConsumer(channel);
             consumer.ReceivedAsync += async (model, ea) =>
             {
                 string? correlationId = ea.BasicProperties.CorrelationId;
 
-                await processingSlots.WaitAsync();
                 try
                 {
                     if (string.IsNullOrEmpty(correlationId))
                     {
                         this.logger.LogWarning("Received message without correlationId");
-                        await channel!.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: false);
+                        await channel.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: false);
                         return;
                     }
 
@@ -187,7 +216,7 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
                     if (inputMessage == null)
                     {
                         this.logger.LogError($"Failed to deserialize message. Correlation id: {correlationId}");
-                        await channel!.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: false);
+                        await channel.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: false);
                         return;
                     }
 
@@ -196,20 +225,35 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
                         if (!llmProvidersDict.TryGetValue(inputMessage.ModelProvider, out var provider))
                         {
                             this.logger.LogError($"Unknown provider: {inputMessage.ModelProvider}. Correlation id: {correlationId}");
-                            await channel!.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: false);
+                            await channel.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: false);
                             return;
                         }
 
-                        var response = await GetCompletionWithRetry(provider, inputMessage.Prompt, correlationId);                        
-                        await PublishMessage(correlationId, inputMessage.ReplyTo, response);                        
-                        await channel!.BasicAckAsync(deliveryTag: ea.DeliveryTag, multiple: false);                        
+                        var response = await GetCompletionWithRetry(provider, inputMessage.Prompt, correlationId);
+                        
+                        await startPublishingLock.WaitAsync();
+                        if(!publishingStarted) await StartPublishing();
+                        startPublishingLock.Release();
+                        
+                        var responseObject = new
+                        {
+                            LlmResponse = JsonDocument.Parse(response, new JsonDocumentOptions
+                            {
+                                AllowTrailingCommas = true
+                            }).RootElement
+                        };
+                        var bodyJson = JsonSerializer.Serialize(responseObject);
+                        var bodyBytes = Encoding.UTF8.GetBytes(bodyJson);
+
+                        this.outputQueue.Enqueue(new OutputMessage(correlationId, inputMessage.ReplyTo, bodyBytes));
+                        await channel.BasicAckAsync(deliveryTag: ea.DeliveryTag, multiple: false);                        
                         this.logger.LogInformation($"Successfully processed message. Correlation id: {correlationId}");
                     }
                     catch (Exception ex)
                     {
                         this.logger.LogError(ex, $"Error during processing message. Correlation id: {correlationId}");
                         var shouldRequeue = IsTransientError(ex);
-                        await channel!.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: shouldRequeue);
+                        await channel.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: shouldRequeue);
                         
                         if (shouldRequeue)
                         {
@@ -224,15 +268,11 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
                 catch (Exception ex)
                 {
                     this.logger.LogError(exception: ex, $"Error during processing message. Correlation id: {correlationId}.\nMessage: {ex.Message}");
-                    await channel!.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: true);
-                }
-                finally
-                {
-                    processingSlots.Release();
+                    await channel.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: true);
                 }
             };
 
-            await this.channel!.BasicConsumeAsync(this.inputQueueName, autoAck: false, consumer: consumer);
+            await channel.BasicConsumeAsync(this.inputQueueName, autoAck: false, consumer: consumer);
         }
 
         private async Task<string> GetCompletionWithRetry(LlmProvider provider, string prompt, string correlationId)
@@ -269,25 +309,100 @@ namespace LLMSiteClassifier.Sevices.MessageQueueService
                 (ex.Message?.Contains("timeout", StringComparison.OrdinalIgnoreCase) ?? false);
         }
 
-        public async Task PublishMessage(string correlationId, string replyTo, string response)
+        private async Task EnsureOutputConnectionAsync()
         {
-            var responseObject = new
-            {
-                LlmResponse = JsonDocument.Parse(response, new JsonDocumentOptions
-                {
-                    AllowTrailingCommas = true
-                }).RootElement
-            };
-            
-            var bodyJson = JsonSerializer.Serialize(responseObject);
-            var bodyBytes = Encoding.UTF8.GetBytes(bodyJson);
+            if (this.outputConnection != null && this.outputConnection.IsOpen 
+                && this.outputChannel != null && this.outputChannel.IsOpen) return;
 
-            await this.channel!.BasicPublishAsync(
-                exchange: "",
-                routingKey: replyTo,
-                mandatory: true,
-                basicProperties: new BasicProperties { CorrelationId = correlationId },
-                body: bodyBytes);                
+            await outputConnectionLock.WaitAsync();
+            try
+            {
+                if (this.outputConnection != null && this.outputConnection.IsOpen 
+                    && this.outputChannel != null && this.outputChannel.IsOpen) return;
+
+                this.outputConnection = await this.connectionFactory.CreateConnectionAsync();
+                this.logger.LogInformation("RabbitMQ connection established");
+
+                this.outputChannel = await this.outputConnection.CreateChannelAsync();
+            }
+            catch (Exception ex)
+            {
+                this.logger.LogError(ex, "Failed to establish RabbitMQ output connection");
+                
+                if (this.outputConnection != null)
+                {
+                    await this.outputConnection.CloseAsync();
+                    await this.outputConnection.DisposeAsync();
+                    this.outputConnection = null;
+                }
+                
+                throw;
+            }
+            finally
+            {
+                outputConnectionLock.Release();
+            }
+        }
+
+        private async Task StartPublishing()
+        {
+            try
+            {
+                publishingStarted = true;
+                _ = Task.Run(async () =>
+                {
+                    while (true)
+                    {
+                        if(this.outputQueue.TryDequeue(out var message))
+                        {
+                            var attempt = 0;
+                            const int maxAttempts = 5;
+                            var published = false;
+
+                            while (attempt < maxAttempts && !published)
+                            {
+                                try
+                                {
+                                    attempt++;
+
+                                    string jsonString = JsonSerializer.Serialize(message);
+                                    var body = Encoding.UTF8.GetBytes(jsonString);
+
+                                    await EnsureOutputConnectionAsync();
+
+                                    await this.outputChannel!.BasicPublishAsync(
+                                        exchange: "",
+                                        routingKey: message.ReplyTo,
+                                        mandatory: true,
+                                        basicProperties: new BasicProperties { CorrelationId = message.CorrelationId },
+                                        body: message.ResponseBody); 
+                                    
+                                    published = true;
+                                }
+                                catch (Exception ex) when (attempt < maxAttempts)
+                                {
+                                    this.outputQueue.Enqueue(message);
+                                    this.logger.LogWarning(ex, 
+                                        $"Failed to publish message (attempt {attempt}/{maxAttempts}), retrying...");
+                                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+                                }
+                                catch (Exception ex)
+                                {
+                                    this.outputQueue.Enqueue(message);
+                                    this.logger.LogError(ex, 
+                                        $"Failed to publish message after {maxAttempts} attempts");
+                                }
+                            }
+                        }
+                        else await Task.Delay(1000);
+                    }
+                });
+            }
+            catch(Exception ex)
+            {
+                publishingStarted = false;
+                this.logger.LogError(ex, $"Failed to publish messages.");
+            }
         }
     }
 }
