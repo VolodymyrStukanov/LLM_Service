@@ -6,18 +6,15 @@ namespace LLMService.Services.LLMService.LllHttpClients
     public class GrokHttpClient : ILlmHttpClient
     {
         private readonly HttpClient httpClient;
-        private readonly string location = "";
-        private readonly string model = "grok-4-fast-non-reasoning";
-        // private readonly string model = "grok-3";
         public GrokHttpClient(HttpClient httpClient)
         {
             this.httpClient = httpClient;
         }
-        public async Task<string> SendToLlm(string prompt)
+        public async Task<string> SendToLlm(string prompt, string model)
         {
-            var response = await this.httpClient.PostAsJsonAsync(location, new
+            var response = await this.httpClient.PostAsJsonAsync("", new
             {
-                model = this.model,
+                model = model,
                 messages = new[] { new { role = "user", content = prompt } }
             });
             

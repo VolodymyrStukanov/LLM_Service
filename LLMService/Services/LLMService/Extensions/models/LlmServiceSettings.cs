@@ -1,5 +1,7 @@
 
-namespace LLMService.Services.LLMService.models
+using LLMService.Services.LLMService.models;
+
+namespace LLMService.Services.LLMService.Extensions.models
 {
     public class LlmServiceSettings
     {

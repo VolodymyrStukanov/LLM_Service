@@ -1,5 +1,5 @@
 
-namespace LLMService.Services.LLMService.models
+namespace LLMService.Services.LLMService.Extensions.models
 {
     public class LlmClientSettings
     {        

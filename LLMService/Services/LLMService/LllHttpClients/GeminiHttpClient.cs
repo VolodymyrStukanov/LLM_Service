@@ -6,14 +6,13 @@ namespace LLMService.Services.LLMService.LllHttpClients
     public class GeminiHttpClient : ILlmHttpClient
     {
         private readonly HttpClient httpClient;
-        private readonly string location = "models/gemini-2.5-flash:generateContent";
         public GeminiHttpClient(HttpClient httpClient)
         {
             this.httpClient = httpClient;
         }
-        public async Task<string> SendToLlm(string prompt)
+        public async Task<string> SendToLlm(string prompt, string model)
         {
-            var response = await this.httpClient.PostAsJsonAsync(location, new
+            var response = await this.httpClient.PostAsJsonAsync($"models/{model}", new
             {
                 contents = new[] { new { parts = new[] { new { text = prompt } } } }
             });

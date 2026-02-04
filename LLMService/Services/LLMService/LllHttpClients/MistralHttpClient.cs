@@ -6,19 +6,17 @@ namespace LLMService.Services.LLMService.LllHttpClients
     public class MistralHttpClient : ILlmHttpClient
     {
         private readonly HttpClient httpClient;
-        private readonly string location = "";
-        private readonly string model = "mistral-medium-latest";
         private readonly int maxTokens = 1000;
         public MistralHttpClient(HttpClient httpClient)
         {
             this.httpClient = httpClient;
         }
-        public async Task<string> SendToLlm(string prompt)
+        public async Task<string> SendToLlm(string prompt, string model)
         {
-            var response = await this.httpClient.PostAsJsonAsync(location, new
+            var response = await this.httpClient.PostAsJsonAsync("", new
             {
                 max_tokens = this.maxTokens,
-                model = this.model,
+                model = model,
                 messages = new[] { new { role = "user", content = prompt } }
             });
 

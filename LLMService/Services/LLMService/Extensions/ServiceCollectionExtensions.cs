@@ -1,3 +1,4 @@
+using LLMService.Services.LLMService.Extensions.models;
 using LLMService.Services.LLMService.HttpClientFactory;
 using LLMService.Services.LLMService.models;
 using Polly;
@@ -12,7 +13,7 @@ namespace LLMService.Services.LLMService.Extensions
 
             var settings = configuration.GetSection("LlmServiceSettings").Get<LlmServiceSettings>();
 
-            // Register named HttpClients with Polly retry policies
+            // Register HttpClients
             foreach (var provider in Enum.GetValues<LlmProvider>())
             {
                 if (settings?.Providers?.ContainsKey(provider) == true)
@@ -29,7 +30,7 @@ namespace LLMService.Services.LLMService.Extensions
                             {
                                 client.DefaultRequestHeaders.Add(header.Key, header.Value);
                             }
-                            client.DefaultRequestHeaders.Add("User-Agent", "LeadGenerationLlmService/1.0");
+                            client.DefaultRequestHeaders.Add("User-Agent", "LlmService/1.0");
                         })
                         .AddTransientHttpErrorPolicy(policyBuilder =>
                             policyBuilder.WaitAndRetryAsync(

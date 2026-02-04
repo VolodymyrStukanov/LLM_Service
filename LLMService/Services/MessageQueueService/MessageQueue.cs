@@ -285,7 +285,7 @@ namespace LLMService.Sevices.MessageQueueService
                 try
                 {
                     attempt++;
-                    return await this.llmService.GetCompletionAsync(provider, prompt);
+                    return await this.llmService.GetCompletionAsync(provider, "", prompt);
                 }
                 catch (Exception ex) when (attempt < maxAttempts && IsTransientError(ex))
                 {

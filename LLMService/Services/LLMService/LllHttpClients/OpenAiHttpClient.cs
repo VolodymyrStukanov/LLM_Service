@@ -6,18 +6,16 @@ namespace LLMService.Services.LLMService.LllHttpClients
     public class OpenAiHttpClient : ILlmHttpClient
     {
         private readonly HttpClient httpClient;
-        private readonly string location = "";
-        private readonly string model = "gpt-4.1-mini";
         private readonly int maxTokens = 1000;
         public OpenAiHttpClient(HttpClient httpClient)
         {
             this.httpClient = httpClient;
         }
-        public async Task<string> SendToLlm(string prompt)
+        public async Task<string> SendToLlm(string prompt, string model)
         {
-            var response = await this.httpClient.PostAsJsonAsync(location, new
+            var response = await this.httpClient.PostAsJsonAsync("", new
             {
-                model = this.model,
+                model = model,
                 input = prompt
             });
 
