@@ -1,6 +1,5 @@
 using LLMService.Services.LLMService;
 using LLMService.Services.LLMService.Extensions;
-using LLMService.Sevices.MessageQueueService;
 using Serilog;
 using Serilog.Events;
 
@@ -33,7 +32,7 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddLlmHttpClients(builder.Configuration);
 builder.Services.AddSingleton<LlmService>();
-builder.Services.AddHostedService<MessageQueue>();
+// builder.Services.AddHostedService<MessageQueue>();
 
 var app = builder.Build();
 

@@ -1,40 +1,46 @@
 using System.Text.Json;
-using LLMService.Services.LLMService.Interfaces;
+using LLMService.Services.LLMService.LllHttpClients.Abstractions;
 
 namespace LLMService.Services.LLMService.LllHttpClients
 {
-    public class MistralHttpClient : ILlmHttpClient
+    public class MistralHttpClient : BaseLlmHttpClient
     {
-        private readonly HttpClient httpClient;
-        private readonly int maxTokens = 1000;
-        public MistralHttpClient(HttpClient httpClient)
+        private readonly int _maxTokens = 1000;
+
+        public MistralHttpClient(HttpClient httpClient, ILogger<MistralHttpClient> logger)
+            : base(httpClient, logger) { }
+
+        protected override async Task<HttpResponseMessage> SendRequestAsync(string prompt, string model)
         {
-            this.httpClient = httpClient;
-        }
-        public async Task<string> SendToLlm(string prompt, string model)
-        {
-            var response = await this.httpClient.PostAsJsonAsync("", new
+            var requestBody = new
             {
-                max_tokens = this.maxTokens,
+                max_tokens = _maxTokens,
                 model = model,
                 messages = new[] { new { role = "user", content = prompt } }
-            });
+            };
 
-            if (response.IsSuccessStatusCode)
-            {
-                var resultJson = await response.Content.ReadFromJsonAsync<JsonElement>();
-                var text = resultJson
-                    .GetProperty("choices")[0]
-                    .GetProperty("message")
-                    .GetProperty("content")
-                    .ToString();
-                return text ?? "Empty result";
-            }
-            else
-            {
-                return "Error";
-            }
+            return await HttpClient.PostAsJsonAsync("", requestBody);
         }
-        
+
+        protected override async Task<string> ParseResponseAsync(HttpResponseMessage response)
+        {
+            var resultJson = await response.Content.ReadFromJsonAsync<JsonElement>();
+            
+            if (!resultJson.TryGetProperty("choices", out var choices))
+                throw new InvalidOperationException("Response missing 'choices' property");
+
+            if (choices.GetArrayLength() == 0)
+                throw new InvalidOperationException("Response choices array is empty");
+
+            if (!choices[0].TryGetProperty("message", out var message))
+                throw new InvalidOperationException("Response missing 'message' property");
+
+            if (!message.TryGetProperty("content", out var contentElement))
+                throw new InvalidOperationException("Response missing 'content' property");
+
+            return contentElement.GetString() ?? string.Empty;
+        }
+
+        protected override string GetProviderName() => "Mistral";
     }
 }

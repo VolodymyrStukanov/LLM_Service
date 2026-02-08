@@ -1,4 +1,4 @@
-using LLMService.Services.LLMService.Interfaces;
+using LLMService.Services.LLMService.LllHttpClients.Abstractions;
 using LLMService.Services.LLMService.models;
 
 namespace LLMService.Services.LLMService.HttpClientFactory

@@ -1,39 +1,46 @@
 using System.Text.Json;
-using LLMService.Services.LLMService.Interfaces;
+using LLMService.Services.LLMService.LllHttpClients.Abstractions;
 
 namespace LLMService.Services.LLMService.LllHttpClients
 {
-    public class OpenAiHttpClient : ILlmHttpClient
+    public class OpenAiHttpClient : BaseLlmHttpClient
     {
-        private readonly HttpClient httpClient;
-        private readonly int maxTokens = 1000;
-        public OpenAiHttpClient(HttpClient httpClient)
+        private readonly int _maxTokens = 1000;
+
+        public OpenAiHttpClient(HttpClient httpClient, ILogger<OpenAiHttpClient> logger)
+            : base(httpClient, logger) { }
+
+        protected override async Task<HttpResponseMessage> SendRequestAsync(string prompt, string model)
         {
-            this.httpClient = httpClient;
-        }
-        public async Task<string> SendToLlm(string prompt, string model)
-        {
-            var response = await this.httpClient.PostAsJsonAsync("", new
+            var requestBody = new
             {
                 model = model,
-                input = prompt
-            });
+                messages = new[] { new { role = "user", content = prompt } },
+                max_tokens = _maxTokens
+            };
 
-            if (response.IsSuccessStatusCode)
-            {
-                var resultJson = await response.Content.ReadFromJsonAsync<JsonElement>();
-                var text = resultJson
-                    .GetProperty("output")[0]
-                    .GetProperty("content")[0]
-                    .GetProperty("text")
-                    .ToString();
-                return text ?? "Empty result";
-            }
-            else
-            {
-                return "Error";
-            }
+            return await HttpClient.PostAsJsonAsync("", requestBody);
         }
-        
+
+        protected override async Task<string> ParseResponseAsync(HttpResponseMessage response)
+        {
+            var resultJson = await response.Content.ReadFromJsonAsync<JsonElement>();
+            
+            if (!resultJson.TryGetProperty("choices", out var choices))
+                throw new InvalidOperationException("Response missing 'choices' property");
+
+            if (choices.GetArrayLength() == 0)
+                throw new InvalidOperationException("Response choices array is empty");
+
+            if (!choices[0].TryGetProperty("message", out var message))
+                throw new InvalidOperationException("Response missing 'message' property");
+
+            if (!message.TryGetProperty("content", out var contentElement))
+                throw new InvalidOperationException("Response missing 'content' property");
+
+            return contentElement.GetString() ?? string.Empty;
+        }
+
+        protected override string GetProviderName() => "OpenAI";
     }
 }

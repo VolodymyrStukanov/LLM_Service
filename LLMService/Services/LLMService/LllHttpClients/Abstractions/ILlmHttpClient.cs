@@ -1,4 +1,4 @@
-namespace LLMService.Services.LLMService.Interfaces
+namespace LLMService.Services.LLMService.LllHttpClients.Abstractions
 {
     public interface ILlmHttpClient
     {

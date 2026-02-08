@@ -12,15 +12,6 @@ namespace LLMService.Sevices.MessageQueueService
 {
     public class MessageQueue : BackgroundService
     {
-        private readonly Dictionary<string, LlmProvider> llmProvidersDict = new()
-        {
-            {"Gemini", LlmProvider.Gemini },
-            {"OpenAI", LlmProvider.OpenAI },
-            {"Grok", LlmProvider.Grok },
-            {"Claude", LlmProvider.Claude },
-            {"Mistral", LlmProvider.Mistral },
-        };
-
         private IConnection? inputConnection;
         private IConnection? outputConnection;
         private bool publishingStarted = false;
@@ -222,14 +213,15 @@ namespace LLMService.Sevices.MessageQueueService
 
                     try
                     {
-                        if (!llmProvidersDict.TryGetValue(inputMessage.ModelProvider, out var provider))
+                        var provider = Enum.GetNames(typeof(LlmProvider)).AsEnumerable().FirstOrDefault<string?>(x => x == inputMessage.ModelProvider);
+                        if (provider == null)
                         {
                             this.logger.LogError($"Unknown provider: {inputMessage.ModelProvider}. Correlation id: {correlationId}");
                             await channel.BasicNackAsync(deliveryTag: ea.DeliveryTag, multiple: false, requeue: false);
                             return;
                         }
 
-                        var response = await GetCompletionWithRetry(provider, inputMessage.Prompt, correlationId);
+                        var response = await GetCompletionWithRetry((LlmProvider)Enum.Parse(typeof(LlmProvider), provider), inputMessage.Prompt, correlationId);
                         
                         await startPublishingLock.WaitAsync();
                         if(!publishingStarted) await StartPublishing();
@@ -285,7 +277,10 @@ namespace LLMService.Sevices.MessageQueueService
                 try
                 {
                     attempt++;
-                    return await this.llmService.GetCompletionAsync(provider, "", prompt);
+                    //////////////////////////////////
+                    //  SET NORMAL model PARAMETER, IT DOES NOT WORK NOW
+                    return await this.llmService.Send(provider, "", prompt);
+                    //////////////////////////////////
                 }
                 catch (Exception ex) when (attempt < maxAttempts && IsTransientError(ex))
                 {
