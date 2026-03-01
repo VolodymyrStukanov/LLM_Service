@@ -8,7 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .Enrich.FromLogContext()
-    .WriteTo.Console(restrictedToMinimumLevel: LogEventLevel.Error | LogEventLevel.Fatal)
+    .WriteTo.Console(restrictedToMinimumLevel: LogEventLevel.Error)
     .WriteTo.File(
         "logs/all_logs.txt",
         rollingInterval: RollingInterval.Day,
@@ -16,7 +16,7 @@ Log.Logger = new LoggerConfiguration()
     .WriteTo.File(
         "logs/error_logs.txt",
         rollingInterval: RollingInterval.Day,
-        restrictedToMinimumLevel: LogEventLevel.Error | LogEventLevel.Fatal,
+        restrictedToMinimumLevel: LogEventLevel.Error,
         shared: true)
     .CreateLogger();
 
@@ -26,9 +26,7 @@ builder.Host.UseSerilog();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddControllers();
-builder.Services.AddSwaggerGen();
 
 builder.Services.AddLlmHttpClients(builder.Configuration);
 builder.Services.AddSingleton<LlmService>();
@@ -43,7 +41,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// app.UseHttpsRedirection();
 app.MapControllers();
 
 app.Run();
