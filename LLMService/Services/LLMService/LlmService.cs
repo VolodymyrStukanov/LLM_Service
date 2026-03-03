@@ -17,14 +17,24 @@ namespace LLMService.Services.LLMService
             _logger = logger;
         }
 
-        public async Task<string> Send(LlmProvider provider, string model, string prompt)
+        public async Task<string> Send(LlmProvider provider, string model, string prompt, List<IFormFile>? files)
         {
+            List<FileAttachment>? attachments = null;
+            if (files != null && files.Any())
+            {
+                attachments = new List<FileAttachment>();
+                foreach (var file in files)
+                {
+                    attachments.Add(await FileAttachment.FromFormFileAsync(file));
+                }
+            }
+
             var client = _providers.GetOrAdd(provider, p =>
             {
                 _logger.LogDebug("Creating new HTTP client for provider {Provider}", p);
                 return _clientFactory.CreateClient(p);
             });
-            var response = await client.SendToLlm(prompt, model);
+            var response = await client.SendToLlm(prompt, model, attachments);
             return response;
         }
 

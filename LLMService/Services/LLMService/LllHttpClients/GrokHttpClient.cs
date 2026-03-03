@@ -1,5 +1,6 @@
 using System.Text.Json;
 using LLMService.Services.LLMService.LllHttpClients.Abstractions;
+using LLMService.Services.LLMService.models;
 
 namespace LLMService.Services.LLMService.LllHttpClients
 {
@@ -39,5 +40,10 @@ namespace LLMService.Services.LLMService.LllHttpClients
         }
 
         protected override string GetProviderName() => "Grok";
+
+        protected override Task<HttpResponseMessage> SendRequestWithAttachmentsAsync(string prompt, string model, List<FileAttachment> attachments)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

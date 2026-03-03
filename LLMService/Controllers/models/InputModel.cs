@@ -14,5 +14,6 @@ namespace LLMService.Controllers.models
 
         [Required(ErrorMessage = "Model is required")]
         public string Model { get; init; } = string.Empty;
+        public List<IFormFile>? Files { get; set; }
     }
 }

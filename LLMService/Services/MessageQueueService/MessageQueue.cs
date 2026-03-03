@@ -279,7 +279,7 @@ namespace LLMService.Sevices.MessageQueueService
                     attempt++;
                     //////////////////////////////////
                     //  SET NORMAL model PARAMETER, IT DOES NOT WORK NOW
-                    return await this.llmService.Send(provider, "", prompt);
+                    return await this.llmService.Send(provider, "", prompt, null);
                     //////////////////////////////////
                 }
                 catch (Exception ex) when (attempt < maxAttempts && IsTransientError(ex))

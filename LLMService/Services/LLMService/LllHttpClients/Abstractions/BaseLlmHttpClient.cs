@@ -1,4 +1,5 @@
 using System.Text.Json;
+using LLMService.Services.LLMService.models;
 
 namespace LLMService.Services.LLMService.LllHttpClients.Abstractions
 {
@@ -13,7 +14,7 @@ namespace LLMService.Services.LLMService.LllHttpClients.Abstractions
             Logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task<string> SendToLlm(string prompt, string model)
+        public async Task<string> SendToLlm(string prompt, string model, List<FileAttachment>? attachments)
         {
             ValidateInput(prompt, model);
 
@@ -22,7 +23,8 @@ namespace LLMService.Services.LLMService.LllHttpClients.Abstractions
             {
                 Logger.LogDebug("Sending request to {Provider} with model {Model}", GetProviderName(), model);
 
-                response = await SendRequestAsync(prompt, model);
+                response = attachments != null 
+                    ? await SendRequestWithAttachmentsAsync(prompt, model, attachments) : await SendRequestAsync(prompt, model);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -101,6 +103,11 @@ namespace LLMService.Services.LLMService.LllHttpClients.Abstractions
         /// Sends the HTTP request to the LLM provider
         /// </summary>
         protected abstract Task<HttpResponseMessage> SendRequestAsync(string prompt, string model);
+
+        /// <summary>
+        /// Sends the HTTP request with attachments to the LLM provider
+        /// </summary>
+        protected abstract Task<HttpResponseMessage> SendRequestWithAttachmentsAsync(string prompt, string model, List<FileAttachment> attachments);
 
         /// <summary>
         /// Parses the response and extracts the text content
