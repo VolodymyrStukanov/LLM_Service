@@ -63,7 +63,7 @@ A robust, production-ready ASP.NET Core service for unified communication with m
 
 ### Prerequisites
 
-- .NET 8.0 SDK or later
+- .NET 10.0 SDK or later
 - API keys for the LLM providers you want to use
 
 ### Installation
