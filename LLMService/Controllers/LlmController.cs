@@ -26,14 +26,7 @@ namespace LLMService.Controllers
         [HttpPost]
         [RequestSizeLimit(100_000_000)]
         public async Task<IActionResult> SendMessage([FromForm]InputModel inputModel)
-        {
-            if (!ModelState.IsValid)
-            {
-                _logger.LogWarning("Model validation failed: {Errors}", 
-                    string.Join(", ", ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage)));
-                return BadRequest(ModelState);
-            }
-            
+        {            
             if (!Enum.TryParse<LlmProvider>(inputModel.Provider, true, out var provider))
             {
                 _logger.LogWarning("Invalid provider requested: {Provider}", inputModel.Provider);
