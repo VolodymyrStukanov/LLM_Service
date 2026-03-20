@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using LLMService.Services.LLMService;
 using LLMService.Services.LLMService.models;
@@ -221,20 +222,19 @@ namespace LLMService.Sevices.MessageQueueService
                             return;
                         }
 
-                        var response = await GetCompletionWithRetry((LlmProvider)Enum.Parse(typeof(LlmProvider), provider), inputMessage.Prompt, correlationId);
+                        var response = await GetCompletionWithRetry((LlmProvider) Enum.Parse(typeof(LlmProvider), provider), inputMessage.Model, inputMessage.Prompt, correlationId);
                         
                         await startPublishingLock.WaitAsync();
                         if(!publishingStarted) await StartPublishing();
                         startPublishingLock.Release();
-                        
                         var responseObject = new
                         {
-                            LlmResponse = JsonDocument.Parse(response, new JsonDocumentOptions
-                            {
-                                AllowTrailingCommas = true
-                            }).RootElement
+                            LlmResponse = response
                         };
-                        var bodyJson = JsonSerializer.Serialize(responseObject);
+                        var bodyJson = JsonSerializer.Serialize(responseObject, new JsonSerializerOptions
+                        {
+                            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                        });
                         var bodyBytes = Encoding.UTF8.GetBytes(bodyJson);
 
                         this.outputQueue.Enqueue(new OutputMessage(correlationId, inputMessage.ReplyTo, bodyBytes));
@@ -267,7 +267,7 @@ namespace LLMService.Sevices.MessageQueueService
             await channel.BasicConsumeAsync(this.inputQueueName, autoAck: false, consumer: consumer);
         }
 
-        private async Task<string> GetCompletionWithRetry(LlmProvider provider, string prompt, string correlationId)
+        private async Task<string> GetCompletionWithRetry(LlmProvider provider, string model, string prompt, string correlationId)
         {
             const int maxAttempts = 5;
             var attempt = 0;
@@ -277,10 +277,7 @@ namespace LLMService.Sevices.MessageQueueService
                 try
                 {
                     attempt++;
-                    //////////////////////////////////
-                    //  SET NORMAL model PARAMETER, IT DOES NOT WORK NOW
-                    return await this.llmService.Send(provider, "", prompt, null);
-                    //////////////////////////////////
+                    return await this.llmService.Send(provider, model, prompt, null);
                 }
                 catch (Exception ex) when (attempt < maxAttempts && IsTransientError(ex))
                 {

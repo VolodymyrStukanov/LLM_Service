@@ -1,4 +1,4 @@
 namespace LLMService.Services.MessageQueueService.models
 {
-    public record InputMessage (string ReplyTo, string Prompt, string ModelProvider);
+    public record InputMessage (string ReplyTo, string Prompt, string ModelProvider, string Model);
 }
